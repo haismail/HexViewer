@@ -3,6 +3,7 @@ import sublime_plugin
 from random import randrange
 from os.path import basename
 from struct import unpack
+import re
 
 HIGHLIGHT_SCOPE = "string"
 HIGHLIGHT_ICON = "dot"
@@ -23,6 +24,10 @@ def is_enabled():
     syntax = view.settings().get('syntax')
     language = basename(syntax).replace('.tmLanguage', '').lower() if syntax != None else "plain text"
     return (language == "hex")
+
+
+def get_byte_count(start, end, group_size):
+    return int((end - start - 1) / (group_size * 2 + 1)) * int(group_size) + int(((end - start - 1) % (group_size * 2 + 1)) / 2 + 1)
 
 
 class HexUtilityListenerCommand(sublime_plugin.EventListener):
@@ -134,9 +139,6 @@ class HexNavCommand(sublime_plugin.WindowCommand):
         # Display total hex bytes
         self.view.set_status('hex_total_bytes', "Total Bytes: " + str(self.total_bytes))
 
-    def get_byte_count(self, start, end):
-        return int((end - start - 1) / (self.group_size * 2 + 1)) * self.group_size + ((end - start - 1) % (self.group_size * 2 + 1)) / 2 + 1
-
     def hex_selection(self, start, bytes, first_pos):
         offset = 11
         row, column = self.view.rowcol(first_pos)
@@ -206,14 +208,14 @@ class HexNavCommand(sublime_plugin.WindowCommand):
 
         # Get range of hex data
         line = view.line(start)
-        hex_chars = int((self.group_size * 2) * self.bytes_wide / (self.group_size) + self.bytes_wide / (self.group_size) + 2)
+        hex_chars = int((self.group_size * 2) * self.bytes_wide / (self.group_size) + self.bytes_wide / (self.group_size)) - 1
         hex_range = sublime.Region(
             line.begin() + offset,
             line.begin() + offset + hex_chars
         )
 
         # Determine if selection is within hex range
-        if start >= hex_range.begin() and end <= hex_range.end() + 1:
+        if start >= hex_range.begin() and end <= hex_range.end():
             # Adjust beginning of selection to begining of first selected byte
             if self.view.score_selector(start, 'raw.nibble.upper') == 0:
                 if self.view.score_selector(start, 'raw.nibble.lower'):
@@ -224,26 +226,24 @@ class HexNavCommand(sublime_plugin.WindowCommand):
                     start = None
             # Adjust ending of selection to end of last selected byte
             if sel.size() == 0 and start != None:
-                end = start + 2
+                end = start + 1
                 bytes = 1
-            elif self.view.score_selector(end, 'raw.nibble.upper') == 0:
-                if self.view.score_selector(end, 'raw.nibble.lower'):
-                    end += 1
-                elif self.view.score_selector(end - 1, 'raw.nibble.lower') == 0:
-                    end = None
-            else:
-                end -= 1
+            elif self.view.score_selector(end, 'raw.nibble.lower') == 0:
+                if self.view.score_selector(end - 1, 'raw.nibble.lower'):
+                    end -= 1
+                else:
+                    end -= 2
 
             # Highlight hex values and their ascii chars
             if start != None and end != None:
                 if bytes == 0:
-                    bytes = self.get_byte_count(start, end)
+                    bytes = get_byte_count(start, end, self.group_size)
                 self.total_bytes += bytes
                 # Zero based byte number
-                start_byte = self.get_byte_count(hex_range.begin(), start + 2) - 1
+                start_byte = get_byte_count(hex_range.begin(), start + 2, self.group_size) - 1
                 self.hex_selection(start_byte, bytes, start)
                 # Highlight Ascii
-                ascii_start = hex_range.end() + start_byte
+                ascii_start = hex_range.end() + 3 + start_byte
                 ascii_end = ascii_start + bytes
                 self.selected_bytes.append(sublime.Region(ascii_start, ascii_end))
 
@@ -443,6 +443,159 @@ class HexInspectorCommand(sublime_plugin.WindowCommand):
         if not reset and first_byte != None and bytes_wide != None:
             byte8, bytes16, bytes32, bytes64 = self.get_bytes(int(first_byte), int(bytes_wide))
         self.display(self.window.get_output_panel('hex_viewer_inspector'), byte8, bytes16, bytes32, bytes64)
+
+
+class HexDiscardEditsCommand(sublime_plugin.WindowCommand):
+    def is_enabled(self):
+        return is_enabled() and len(self.window.active_view().get_regions("hex_edit"))
+
+    def run(self):
+        view = self.window.active_view()
+        group_size = int(view.settings().get("hex_viewer_bits", None))
+        bytes_wide = int(view.settings().get("hex_viewer_actual_bytes", None))
+        self.window.run_command('hex_viewer', {"bits": group_size, "bytes": bytes_wide})
+
+
+class HexEditCommand(sublime_plugin.WindowCommand):
+    handshake = -1
+
+    def init(self):
+        init_status = False
+        # Get Seetings from settings file
+        group_size = self.view.settings().get("hex_viewer_bits", None)
+        self.bytes_wide = self.view.settings().get("hex_viewer_actual_bytes", None)
+        #Process hex grouping
+        if group_size != None and self.bytes_wide != None:
+            self.group_size = group_size / 8
+            init_status = True
+        return init_status
+
+    def is_enabled(self):
+        return is_enabled()
+
+    def apply_edit(self, value):
+        if self.handshake != -1 and self.handshake == self.view.id():
+            total_chars = self.total_bytes * 2
+            edits = value.strip().replace(" ", "").lower()
+            if len(edits) == total_chars and re.match("[\da-f]{" + str(total_chars) + "}", edits) != None:
+                regions = self.view.get_regions("hex_edit")
+                edits = self.line["data1"] + edits + self.line["data2"]
+                l_buffer = self.line["address"]
+                ascii = " :"
+
+                start = 0
+                end = len(edits)
+                count = 1
+                while start < end:
+                    value = edits[start:start + 2]
+                    l_buffer += value
+                    if count == self.group_size:
+                        l_buffer += " "
+                        count = 0
+                    dec = unpack("=B", value.decode("hex"))[0]
+                    ascii += chr(dec) if dec in xrange(32, 127) else "."
+                    start += 2
+                    count += 1
+
+                delta = int(self.bytes_wide) - len(edits)
+                group_space = int(delta / self.group_size)
+                l_buffer += " " * (group_space + delta * 2) + ascii
+
+                self.view.sel().clear()
+                self.view.set_read_only(False)
+                edit = self.view.begin_edit()
+                self.view.replace(edit, self.line["range"], l_buffer)
+                self.view.end_edit(edit)
+                self.view.set_read_only(True)
+                self.view.sel().add(sublime.Region(self.start_pos, self.end_pos))
+
+                regions.append(sublime.Region(self.start_pos, self.end_pos))
+                regions.append(sublime.Region(self.ascii_pos, self.ascii_end_pos))
+
+                self.view.add_regions(
+                    "hex_edit",
+                    regions,
+                    "keyword"
+                )
+                self.window.run_command('hex_nav')
+
+        self.reset()
+
+    def reset(self):
+        self.handshake = -1
+        self.total_bytes = 0
+        self.start_pos = -1
+        self.end_pos = -1
+        self.line = ""
+
+    def run(self):
+        self.view = self.window.active_view()
+        view = self.view
+        if self.handshake != -1 and self.handshake == self.view.id():
+            self.reset()
+
+        self.handshake = self.view.id()
+        if len(self.view.sel()) == 1:
+            # if not self.init():
+            #     return
+            self.init()
+            sel = self.view.sel()[0]
+            offset = 11
+            start = sel.begin()
+            end = sel.end()
+            bytes = 0
+            # Get range of hex data
+            line = view.line(self.view.sel()[0].a)
+            hex_chars = int((self.group_size * 2) * self.bytes_wide / (self.group_size) + self.bytes_wide / (self.group_size)) - 1
+            hex_range = sublime.Region(
+                line.begin() + offset,
+                line.begin() + offset + hex_chars
+            )
+            # Determine if selection is within hex range
+            if start >= hex_range.begin() and end <= hex_range.end():
+                # Adjust beginning of selection to begining of first selected byte
+                if self.view.score_selector(start, 'raw.nibble.upper') == 0:
+                    if self.view.score_selector(start, 'raw.nibble.lower'):
+                        start -= 1
+                    elif self.view.score_selector(start + 1, 'raw.nibble.upper') and sel.size() > 0:
+                        start += 1
+                    else:
+                        start = None
+                # Adjust ending of selection to end of last selected byte
+                if sel.size() == 0 and start != None:
+                    end = start + 1
+                    bytes = 1
+                elif self.view.score_selector(end, 'raw.nibble.lower') == 0:
+                    if self.view.score_selector(end - 1, 'raw.nibble.lower'):
+                        end -= 1
+                    else:
+                        end -= 2
+
+                # Highlight hex values and their ascii chars
+                if start != None and end != None:
+                    if bytes == 0:
+                        bytes = get_byte_count(start, end, self.group_size)
+                    self.ascii_pos = hex_range.end() + 3 + get_byte_count(hex_range.begin(), start + 1, self.group_size) - 1
+                    self.ascii_end_pos = self.ascii_pos + bytes
+                    self.total_bytes = bytes
+                    # Zero based byte number
+                    self.start_pos = start
+                    self.end_pos = end + 1
+                    self.line = {
+                        "range": line,
+                        "address": view.substr(sublime.Region(line.begin(), line.begin() + 11)),
+                        "data1": view.substr(sublime.Region(hex_range.begin(), start)).strip().replace(" ", ""),
+                        "data2": view.substr(sublime.Region(end + 1, hex_range.end() + 1)).strip().replace(" ", "")
+                    }
+
+                    # Send selected bytes to be edited
+                    self.window.show_input_panel(
+                        "Edit",
+                        view.substr(sublime.Region(start, end + 1)).strip(),
+                        self.apply_edit,
+                        None,
+                        None
+                    )
 
 
 class HexGoToCommand(sublime_plugin.WindowCommand):

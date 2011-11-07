@@ -24,5 +24,13 @@
 	{
 		"caption": "Hex Viewer: Find By Address",
 		"command": "hex_go_to"
+	},
+	{
+		"caption": "Hex Viewer: Show Hex Edit Panel",
+		"command": "hex_edit"
+	},
+	{
+		"caption": "Hex Viewer: Discard All Edits",
+		"command": "hex_discard_edits"
 	}
 ]
