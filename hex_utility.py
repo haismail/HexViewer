@@ -489,9 +489,17 @@ class HexWriterCommand(sublime_plugin.WindowCommand):
     def is_enabled(self):
         return is_enabled()
 
+    def export_panel(self):
+        self.window.show_input_panel(
+            "Export To:",
+            self.export_path,
+            self.prepare_export,
+            None,
+            self.reset
+        )
+
     def prepare_export(self, file_path):
         if exists(dirname(file_path)):
-            self.export_path = file_path
             if exists(file_path):
                 self.window.show_input_panel(
                     "Overwrite File? (yes | no):",
@@ -502,8 +510,12 @@ class HexWriterCommand(sublime_plugin.WindowCommand):
                 )
             else:
                 self.export("yes")
+        else:
+            sublime.error_message("Directory does not exist!")
+            self.export_panel()
 
     def export(self, save):
+        self.view = self.window.active_view()
         if self.handshake != -1 and self.handshake == self.view.id():
             if save == "yes":
                 try:
@@ -523,14 +535,9 @@ class HexWriterCommand(sublime_plugin.WindowCommand):
                     sublime.error_message("Faild to export to " + self.export_path)
                 self.reset()
             else:
-                self.window.show_input_panel(
-                    "Export To:",
-                    self.export_path,
-                    self.prepare_export,
-                    None,
-                    self.reset
-                )
+                self.export_panel()
         else:
+            sublime.error_message("Hex view is no longer in focus! File not saved.")
             self.reset()
 
     def reset(self):
@@ -545,15 +552,9 @@ class HexWriterCommand(sublime_plugin.WindowCommand):
             self.reset()
         self.handshake = self.view.id()
 
-        file_path = self.view.settings().get("hex_viewer_file_name")
+        self.export_path = self.view.settings().get("hex_viewer_file_name")
 
-        self.window.show_input_panel(
-            "Export To:",
-            file_path,
-            self.prepare_export,
-            None,
-            self.reset
-        )
+        self.export_panel()
 
 
 class HexEditCommand(sublime_plugin.WindowCommand):
@@ -575,6 +576,7 @@ class HexEditCommand(sublime_plugin.WindowCommand):
 
     def apply_edit(self, value):
         edits = ""
+        self.view = self.window.active_view()
         # Is this the same view as earlier?
         if self.handshake != -1 and self.handshake == self.view.id():
             total_chars = self.total_bytes * 2
@@ -672,6 +674,8 @@ class HexEditCommand(sublime_plugin.WindowCommand):
 
                 # Update selection
                 self.window.run_command('hex_nav')
+        else:
+            sublime.error_message("Hex view is no longer in focus! Edit Failed.")
         # Clean up
         self.reset()
 
@@ -760,7 +764,7 @@ class HexEditCommand(sublime_plugin.WindowCommand):
 
                     # Send selected bytes to be edited
                     self.window.show_input_panel(
-                        "Edit",
+                        "Edit:",
                         self.view.substr(sublime.Region(start, end + 1)).strip(),
                         self.apply_edit,
                         None,
@@ -769,47 +773,62 @@ class HexEditCommand(sublime_plugin.WindowCommand):
 
 
 class HexGoToCommand(sublime_plugin.WindowCommand):
+    handshake = -1
+
     def go_to_address(self, address):
         #init
         view = self.window.active_view()
 
-        # Adress offset for line
-        group_size = view.settings().get("hex_viewer_bits", None)
-        bytes_wide = view.settings().get("hex_viewer_actual_bytes", None)
-        if group_size == None and bytes_wide == None:
-            return
-        group_size = group_size / BITS_PER_BYTE
+        if self.handshake != -1 and self.handshake == view.id():
+            # Adress offset for line
+            group_size = view.settings().get("hex_viewer_bits", None)
+            bytes_wide = view.settings().get("hex_viewer_actual_bytes", None)
+            if group_size == None and bytes_wide == None:
+                return
+            group_size = group_size / BITS_PER_BYTE
 
-        # Go to address
-        try:
-            # Address wanted
-            wanted = int(address, 16)
-            # Calculate row
-            row = int(wanted / (bytes_wide))
-            # Byte offset into final row
-            byte = wanted % (bytes_wide)
-            #   Calculate byte number              Offset Char
-            #
-            #  wanted_char      byte
-            # ------------ = -----------  => wanted_char + 11 = column
-            #  total_chars   total_bytes
-            #
-            column = int((float(byte) / group_size) * ((group_size) * 2 + 1)) + ADDRESS_OFFSET
+            # Go to address
+            try:
+                # Address wanted
+                wanted = int(address, 16)
+                # Calculate row
+                row = int(wanted / (bytes_wide))
+                # Byte offset into final row
+                byte = wanted % (bytes_wide)
+                #   Calculate byte number              Offset Char
+                #
+                #  wanted_char      byte
+                # ------------ = -----------  => wanted_char + 11 = column
+                #  total_chars   total_bytes
+                #
+                column = int((float(byte) / group_size) * ((group_size) * 2 + 1)) + ADDRESS_OFFSET
 
-            # Go to address and focus
-            pt = view.text_point(row, column)
-            view.sel().clear()
-            view.sel().add(pt)
-            view.show_at_center(pt)
-            # Highlight
-            self.window.run_command('hex_nav')
-        except:
-            pass
+                # Go to address and focus
+                pt = view.text_point(row, column)
+                view.sel().clear()
+                view.sel().add(pt)
+                view.show_at_center(pt)
+                # Highlight
+                self.window.run_command('hex_nav')
+            except:
+                pass
+        else:
+            sublime.error_message("Hex view is no longer in focus! Find address canceled.")
+        self.reset()
+
+    def reset(self):
+        self.handshake = -1
 
     def is_enabled(self):
         return is_enabled()
 
     def run(self):
+         # Identify view
+        view = self.window.active_view()
+        if self.handshake != -1 and self.handshake == view.id():
+            self.reset()
+        self.handshake = view.id()
+
         self.window.show_input_panel(
             "Find: 0x",
             "",
