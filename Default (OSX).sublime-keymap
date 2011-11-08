@@ -14,5 +14,13 @@
 	{
 		"keys": ["super+shift+b","super+shift+e"],
 		"command": "hex_edit"
+	},
+	{
+		"keys": ["super+shift+b","super+shift+x"],
+		"command": "hex_writer"
+	},
+	{
+		"keys": ["super+shift+b","super+shift+v"],
+		"command": "hex_discard_edits"
 	}
 ]

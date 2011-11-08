@@ -32,5 +32,9 @@
 	{
 		"caption": "Hex Viewer: Discard All Edits",
 		"command": "hex_discard_edits"
+	},
+	{
+		"caption": "Hex Viewer: Export Bin",
+		"command": "hex_writer"
 	}
 ]

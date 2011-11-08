@@ -7,6 +7,8 @@ DEFAULT_BIT_GROUP = 16
 DEFAULT_BYTES_WIDE = 24
 VALID_BITS = [8, 16, 32, 64, 128]
 VALID_BYTES = [8, 10, 16, 24, 32, 48, 64, 128, 256, 512]
+BITS_PER_BYTE = 8
+ADDRESS_OFFSET = 11
 
 hv_settings = sublime.load_settings('hex_viewer.sublime-settings')
 
@@ -47,12 +49,12 @@ class HexViewerListenerCommand(sublime_plugin.EventListener):
 
 class HexViewerCommand(sublime_plugin.WindowCommand):
     def set_format(self):
-        self.group_size = DEFAULT_BIT_GROUP / 8
+        self.group_size = DEFAULT_BIT_GROUP / BITS_PER_BYTE
         self.bytes_wide = DEFAULT_BYTES_WIDE
 
         # Set grouping
         if self.bits in VALID_BITS:
-            self.group_size = self.bits / 8
+            self.group_size = self.bits / BITS_PER_BYTE
 
         # Set bytes per line
         if self.bytes in VALID_BYTES:
@@ -62,7 +64,7 @@ class HexViewerCommand(sublime_plugin.WindowCommand):
         # Round to nearest bytes
         offset = self.bytes_wide % self.group_size
         if offset == self.bytes_wide:
-            self.bytes_wide = self.bits / 8
+            self.bytes_wide = self.bits / BITS_PER_BYTE
         elif offset != 0:
             self.bytes_wide -= offset
 
@@ -178,7 +180,8 @@ class HexViewerCommand(sublime_plugin.WindowCommand):
         view.replace(edit, content_buffer, b_buffer)
         view.end_edit(edit)
         view.set_read_only(True)
-        view.sel().add(sublime.Region(0, 0))
+        # Offset past address to first byte
+        view.sel().add(sublime.Region(ADDRESS_OFFSET, ADDRESS_OFFSET))
         if hv_settings.get("inspector", False) and hv_settings.get("inspector_auto_show", False):
             view.window().run_command("hex_show_inspector")
 
