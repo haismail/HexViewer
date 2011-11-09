@@ -9,11 +9,11 @@
 	},
 	{
 		"keys": ["ctrl+shift+b","ctrl+shift+f"],
-		"command": "hex_go_to"
+		"command": "hex_finder"
 	},
 	{
 		"keys": ["ctrl+shift+b","ctrl+shift+e"],
-		"command": "hex_edit"
+		"command": "hex_editor"
 	},
 	{
 		"keys": ["ctrl+shift+b","ctrl+shift+x"],
